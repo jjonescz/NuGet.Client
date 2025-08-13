@@ -6,8 +6,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Xml;
 using System.Xml.Linq;
 using FluentAssertions;
+using Microsoft.Build.Construction;
+using Microsoft.Build.Definition;
+using Microsoft.Build.Evaluation;
+using Microsoft.Build.Execution;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Locator;
+using Microsoft.Build.Logging;
 using Microsoft.Internal.NuGet.Testing.SignedPackages;
 using Microsoft.Internal.NuGet.Testing.SignedPackages.ChildProcess;
 using NuGet.Common;
@@ -883,6 +891,75 @@ EndGlobal";
 
                 // Assert
                 File.Exists(Path.Combine(workingDirectory1, "obj", "project.assets.json")).Should().BeTrue();
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task VirtualProjectAsync(bool staticGraphRestore)
+        {
+            // Arrange
+            using var pathContext = new SimpleTestPathContext();
+            var solution = new SimpleTestSolutionContext(pathContext.SolutionRoot);
+
+            File.WriteAllText(pathContext.NuGetConfig, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                    <packageSources>
+                        <add key="LocalSource" value="{pathContext.PackageSource}" />
+                    </packageSources>
+                </configuration>
+                """);
+
+            var packageX = new SimpleTestPackageContext()
+            {
+                Id = "x",
+                Version = "1.0.0",
+            };
+            packageX.Files.Clear();
+            packageX.AddFile("lib/net472/a.dll");
+
+            await SimpleTestPackageUtility.CreateFolderFeedV3Async(
+                pathContext.PackageSource,
+                packageX);
+
+            var projectTextFile = Path.Join(pathContext.SolutionRoot, "tmp.txt");
+            var virtualProjectPath = Path.Join(pathContext.SolutionRoot, "VirtualProject.csproj");
+            var projectText = $"""
+                <Project Sdk="Microsoft.NET.Sdk">
+                    <PropertyGroup>
+                        <TargetFramework>net472</TargetFramework>
+                        <RestoreUseStaticGraphEvaluation>{staticGraphRestore}</RestoreUseStaticGraphEvaluation>
+                        <VirtualProjectTextFile>{projectTextFile}</VirtualProjectTextFile>
+                    </PropertyGroup>
+                    <ItemGroup>
+                        <PackageReference Include="x" Version="1.0.0" />
+                    </ItemGroup>
+                </Project>
+                """;
+            File.WriteAllText(projectTextFile, projectText);
+
+            MSBuildLocator.RegisterMSBuildPath(_dotnetFixture.SdkDirectory.FullName);
+
+            invokeMSBuild();
+
+            void invokeMSBuild()
+            {
+                // Act
+                var projectCollection = new ProjectCollection();
+                var logger = new ConsoleLogger(LoggerVerbosity.Detailed, s => _testOutputHelper.WriteLine(s.TrimEnd()), _ => { }, () => { });
+                projectCollection.RegisterLogger(logger);
+                var buildParameters = new BuildParameters(projectCollection);
+                buildParameters.Loggers = [logger];
+                var projectRootElement = ProjectRootElement.Create(XmlReader.Create(new StringReader(projectText)));
+                projectRootElement.FullPath = virtualProjectPath;
+                var projectInstance = ProjectInstance.FromProjectRootElement(projectRootElement, new ProjectOptions());
+                var buildRequest = new BuildRequestData(projectInstance, ["Restore"]);
+                var result = BuildManager.DefaultBuildManager.Build(buildParameters, buildRequest);
+
+                // Assert
+                Assert.Equal(BuildResultCode.Success, result.OverallResult);
             }
         }
 

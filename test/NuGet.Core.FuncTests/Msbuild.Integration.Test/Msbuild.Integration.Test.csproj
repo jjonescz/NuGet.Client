@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Locator" />
     <ProjectReference Include="..\..\..\src\NuGet.Core\Microsoft.Build.NuGetSdkResolver\Microsoft.Build.NuGetSdkResolver.csproj" />
     <ProjectReference Include="..\..\..\src\NuGet.Core\NuGet.Build.Tasks.Console\NuGet.Build.Tasks.Console.csproj" />
     <ProjectReference Include="..\..\..\src\NuGet.Core\NuGet.Build.Tasks.Pack\NuGet.Build.Tasks.Pack.csproj" />

@@ -6,8 +6,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Xml;
 using System.Xml.Linq;
 using FluentAssertions;
+using Microsoft.Build.Construction;
+using Microsoft.Build.Definition;
+using Microsoft.Build.Evaluation;
+using Microsoft.Build.Execution;
+using Microsoft.Build.Locator;
 using Microsoft.Internal.NuGet.Testing.SignedPackages.ChildProcess;
 using NuGet.Commands;
 using NuGet.Common;
@@ -313,6 +319,71 @@ $@"<?xml version=""1.0"" encoding=""utf-8""?>
                 var nupkg = NupkgMetadataFileFormat.Read(resolver.GetNupkgMetadataPath(packageX.Id, NuGetVersion.Parse(packageX.Version)), NullLogger.Instance);
                 Assert.Contains($"Installed x 1.0.0 from {pathContext.PackageSource} to {Path.Combine(resolver.RootPath, resolver.GetPackageDirectory(packageX.Id, NuGetVersion.Parse(packageX.Version)))} with content hash {nupkg.ContentHash}.", result.AllOutput);
                 Assert.Contains(configAPath, result.AllOutput);
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task VirtualProjectAsync(bool staticGraphRestore)
+        {
+            // Arrange
+            using var pathContext = new SimpleTestPathContext();
+            var solution = new SimpleTestSolutionContext(pathContext.SolutionRoot);
+
+            File.WriteAllText(pathContext.NuGetConfig, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                    <packageSources>
+                        <add key="LocalSource" value="{pathContext.PackageSource}" />
+                    </packageSources>
+                </configuration>
+                """);
+
+            var packageX = new SimpleTestPackageContext()
+            {
+                Id = "x",
+                Version = "1.0.0"
+            };
+            packageX.Files.Clear();
+            packageX.AddFile("lib/net472/a.dll");
+
+            await SimpleTestPackageUtility.CreateFolderFeedV3Async(
+                pathContext.PackageSource,
+                packageX);
+
+            var virtualProjectPath = Path.Combine(pathContext.SolutionRoot, "VirtualProject.csproj");
+            var projectText = $"""
+                <Project Sdk="Microsoft.NET.Sdk">
+                    <PropertyGroup>
+                        <TargetFramework>net472</TargetFramework>
+                        <RestoreUseStaticGraphEvaluation>{staticGraphRestore}</RestoreUseStaticGraphEvaluation>
+                    </PropertyGroup>
+                    <ItemGroup>
+                        <PackageReference Include="x" Version="1.0.0" />
+                    </ItemGroup>
+                </Project>
+                """;
+            var projectTextFile = Path.Combine(pathContext.SolutionRoot, "tmp.txt");
+            File.WriteAllText(projectTextFile, projectText);
+
+            MSBuildLocator.RegisterDefaults();
+
+            invokeMSBuild();
+
+            void invokeMSBuild()
+            {
+                // Act
+                var projectCollection = new ProjectCollection();
+                var buildParameters = new BuildParameters(projectCollection);
+                var projectRootElement = ProjectRootElement.Create(XmlReader.Create(new StringReader(projectText)));
+                projectRootElement.FullPath = virtualProjectPath;
+                var projectInstance = ProjectInstance.FromProjectRootElement(projectRootElement, new ProjectOptions());
+                var buildRequest = new BuildRequestData(projectInstance, ["Build"]);
+                var result = BuildManager.DefaultBuildManager.Build(buildParameters, buildRequest);
+
+                // Assert
+                Assert.Equal(BuildResultCode.Success, result.OverallResult);
             }
         }
 
