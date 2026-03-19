@@ -113,7 +113,7 @@ namespace NuGet.CommandLine.XPlat
 
                     PackageSearchCommand.Register(packageCommand, getHidePrefixLogger);
 #if DEBUG
-                    PackageUpdateCommand.Register(packageCommand, interactiveOption, virtualProjectBuilder);
+                    PackageUpdateCommand.Register(packageCommand, interactiveOption);
                     PackageDownloadCommand.Register(packageCommand, interactiveOption);
 #endif
                 }

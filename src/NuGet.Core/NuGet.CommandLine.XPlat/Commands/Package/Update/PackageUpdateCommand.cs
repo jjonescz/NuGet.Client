@@ -15,9 +15,11 @@ namespace NuGet.CommandLine.XPlat.Commands.Package.Update;
 
 internal static class PackageUpdateCommand
 {
-    internal static void Register(Command packageCommand, Option<bool> interactiveOption, IVirtualProjectBuilder? virtualProjectBuilder = null)
+    internal static void Register(Command packageCommand, Option<bool> interactiveOption, Func<Func<IVirtualProjectBuilder?, CancellationToken, Task<int>>, CancellationToken, Task<int>>? handler = null)
     {
-        Register(packageCommand, interactiveOption, (args, ct) => PackageUpdateCommandRunner.Run(args, virtualProjectBuilder, ct));
+        Register(packageCommand, interactiveOption, handler is null
+            ? static (args, ct) => PackageUpdateCommandRunner.Run(args, virtualProjectBuilder: null, ct)
+            : (args, ct) => handler((virtualProjectBuilder, ct) => PackageUpdateCommandRunner.Run(args, virtualProjectBuilder, ct), ct));
     }
 
     internal static void Register(Command packageCommand, Option<bool> interactiveOption, Func<PackageUpdateArgs, CancellationToken, Task<int>> action)
